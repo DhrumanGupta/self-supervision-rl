@@ -42,6 +42,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--use_bf16", action="store_true")
+    parser.add_argument(
+        "--enable_verifier_reward",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable the auxiliary same-model verifier reward pass.",
+    )
     parser.add_argument("--exact_match_weight", type=float, default=1.0)
     parser.add_argument("--self_consistency_weight", type=float, default=0.25)
     parser.add_argument("--confidence_weight", type=float, default=0.15)
@@ -74,6 +80,7 @@ def main() -> None:
         self_consistency=args.self_consistency_weight,
         confidence=args.confidence_weight,
         length_penalty=args.length_penalty_weight,
+        enable_verifier_reward=args.enable_verifier_reward,
     )
 
     training_args = GRPOConfig(
@@ -122,6 +129,7 @@ def main() -> None:
         rollout_func=self_reward_rollout,
         peft_config=peft_config,
     )
+    trainer.enable_verifier_reward = args.enable_verifier_reward
     trainer.train()
     trainer.save_model(args.output_dir)
 

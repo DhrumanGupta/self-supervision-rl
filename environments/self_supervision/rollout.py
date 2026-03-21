@@ -56,6 +56,7 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
     max_prompt_length = getattr(
         getattr(trainer, "args", None), "max_prompt_length", None
     )
+    enable_verifier_reward = getattr(trainer, "enable_verifier_reward", True)
     was_training = model.training
     model.eval()
 
@@ -86,6 +87,14 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             first_generated, first_inputs["attention_mask"]
         )
         first_completion_text = _decode_sequences(tokenizer, completion_ids)
+
+        if not enable_verifier_reward:
+            return {
+                "prompt_ids": prompt_ids,
+                "completion_ids": completion_ids,
+                "logprobs": None,
+                "first_completion_text": first_completion_text,
+            }
 
         self_eval_prompts = [
             build_self_eval_messages(prompt_messages=prompt, answer_text=completion)

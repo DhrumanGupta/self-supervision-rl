@@ -9,8 +9,26 @@ CORRECTNESS_PATTERN = re.compile(r"CORRECTNESS\s*:\s*(YES|NO)", flags=re.IGNOREC
 CONFIDENCE_PATTERN = re.compile(r"CONFIDENCE\s*:\s*(HIGH|LOW)", flags=re.IGNORECASE)
 
 
-def extract_final_answer(text: str) -> str:
+def extract_scored_text(text: str) -> str:
     text = (text or "").strip()
+    if not text:
+        return ""
+
+    closing_index = text.rfind("</think>")
+    if closing_index >= 0:
+        return text[closing_index + len("</think>") :].strip()
+    return ""
+
+
+def has_valid_think_format(text: str) -> bool:
+    text = text or ""
+    open_index = text.find("<think>")
+    close_index = text.find("</think>")
+    return open_index >= 0 and close_index > open_index
+
+
+def extract_final_answer(text: str) -> str:
+    text = extract_scored_text(text)
     if not text:
         return ""
 

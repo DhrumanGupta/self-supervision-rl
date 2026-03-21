@@ -7,9 +7,14 @@ import torch
 from prompts import build_self_eval_messages
 
 
-def _render_prompt(tokenizer, prompt: list[dict[str, str]]) -> str:
+def _render_qwen_prompt(
+    tokenizer, messages: list[dict[str, str]], *, enable_thinking: bool
+) -> str:
     return tokenizer.apply_chat_template(
-        prompt, tokenize=False, add_generation_prompt=True
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=enable_thinking,
     )
 
 
@@ -61,7 +66,10 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
     model.eval()
 
     try:
-        rendered_prompts = [_render_prompt(tokenizer, prompt) for prompt in prompts]
+        rendered_prompts = [
+            _render_qwen_prompt(tokenizer, prompt, enable_thinking=True)
+            for prompt in prompts
+        ]
         first_inputs = _tokenize_texts(
             tokenizer, rendered_prompts, device, max_length=max_prompt_length
         )
@@ -101,7 +109,8 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             for prompt, completion in zip(prompts, first_completion_text, strict=False)
         ]
         rendered_self_eval_prompts = [
-            _render_prompt(tokenizer, prompt) for prompt in self_eval_prompts
+            _render_qwen_prompt(tokenizer, prompt, enable_thinking=False)
+            for prompt in self_eval_prompts
         ]
         self_eval_inputs = _tokenize_texts(
             tokenizer,

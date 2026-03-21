@@ -44,13 +44,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_bf16", action="store_true")
     parser.add_argument(
         "--enable_verifier_reward",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        action="store_true",
+        default=False,
         help="Enable the auxiliary same-model verifier reward pass.",
     )
     parser.add_argument("--exact_match_weight", type=float, default=1.0)
-    parser.add_argument("--self_consistency_weight", type=float, default=0.25)
-    parser.add_argument("--confidence_weight", type=float, default=0.15)
+    parser.add_argument("--formatting_weight", type=float, default=0.1)
+    parser.add_argument("--verifier_weight", type=float, default=0.2)
     parser.add_argument("--length_penalty_weight", type=float, default=0.0001)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -77,8 +77,8 @@ def main() -> None:
 
     reward_weights = RewardWeights(
         exact_match=args.exact_match_weight,
-        self_consistency=args.self_consistency_weight,
-        confidence=args.confidence_weight,
+        formatting=args.formatting_weight,
+        verifier=args.verifier_weight,
         length_penalty=args.length_penalty_weight,
         enable_verifier_reward=args.enable_verifier_reward,
     )

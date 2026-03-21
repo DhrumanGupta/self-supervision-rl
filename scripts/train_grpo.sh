@@ -4,13 +4,14 @@ set -euo pipefail
 
 source .venv/bin/activate
 
-accelerate launch environments/self_supervision/train_grpo_self_reward.py \
+accelerate launch --num_processes 8 --mixed_precision bf16 environments/self_supervision/train_grpo_self_reward.py \
   --model_name Qwen/Qwen3.5-2B-Base \
   --dataset_name trl-lib/DeepMath-103K \
   --question_key problem \
   --answer_key answer \
   --output_dir outputs/qwen35-2b-base-deepmath-grpo-peft \
   --use_peft \
+  --use_bf16 \
   --lora_r 16 \
   --lora_alpha 32 \
   --lora_dropout 0.05 \

@@ -45,6 +45,16 @@ def _decode_sequences(tokenizer, token_ids: list[list[int]]) -> list[str]:
     return tokenizer.batch_decode(token_ids, skip_special_tokens=True)
 
 
+def _repeat_prompts(
+    prompts: list[list[dict[str, str]]], num_generations: int
+) -> list[list[dict[str, str]]]:
+    repeated = []
+    for prompt in prompts:
+        for _ in range(num_generations):
+            repeated.append(prompt)
+    return repeated
+
+
 @torch.no_grad()
 def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[str, Any]:
     tokenizer = (
@@ -62,13 +72,19 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
         getattr(trainer, "args", None), "max_prompt_length", None
     )
     enable_verifier_reward = getattr(trainer, "enable_verifier_reward", True)
+    num_generations = int(getattr(trainer, "num_generations", 0) or 0)
+    if num_generations <= 0:
+        num_generations = int(
+            getattr(getattr(trainer, "args", None), "num_generations", 1)
+        )
     was_training = model.training
     model.eval()
 
     try:
+        rollout_prompts = _repeat_prompts(prompts, num_generations)
         rendered_prompts = [
             _render_qwen_prompt(tokenizer, prompt, enable_thinking=True)
-            for prompt in prompts
+            for prompt in rollout_prompts
         ]
         first_inputs = _tokenize_texts(
             tokenizer, rendered_prompts, device, max_length=max_prompt_length
@@ -106,7 +122,9 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
 
         self_eval_prompts = [
             build_self_eval_messages(prompt_messages=prompt, answer_text=completion)
-            for prompt, completion in zip(prompts, first_completion_text, strict=False)
+            for prompt, completion in zip(
+                rollout_prompts, first_completion_text, strict=False
+            )
         ]
         rendered_self_eval_prompts = [
             _render_qwen_prompt(tokenizer, prompt, enable_thinking=False)

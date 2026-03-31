@@ -6,7 +6,7 @@ source .venv/bin/activate
 
 export WANDB_PROJECT=self-supervision-rl
 export WANDB_ENTITY=berlm-ashoka-university
-export WANDB_NAME=8k-context-qwen35-2b-grpo-deepmath
+export WANDB_NAME=4k-context-qwen35-2b-base-deepmath-grpo-peft
 
 export CUDA_VISIBLE_DEVICES=2,3,4,5,6,7
 
@@ -22,7 +22,7 @@ accelerate launch --num_processes $NUM_PROCESSES --num_machines 1 --mixed_precis
   --dataset_name trl-lib/DeepMath-103K \
   --question_key problem \
   --answer_key answer \
-  --output_dir outputs/4k-context-qwen35-2b-base-deepmath-grpo-peft \
+  --output_dir outputs/${WANDB_NAME} \
   --report_to wandb \
   --use_peft \
   --use_bf16 \

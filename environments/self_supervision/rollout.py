@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 
-from prompts import build_self_eval_messages
+from environments.self_supervision.prompts import build_self_eval_messages
 
 
 def _render_qwen_prompt(
@@ -32,27 +32,17 @@ def _tokenize_texts(
 
 
 def _extract_completion_ids(
-    generated_ids: torch.Tensor, attention_mask: torch.Tensor
+    generated_ids: torch.Tensor, input_ids: torch.Tensor
 ) -> list[list[int]]:
-    prompt_lengths = attention_mask.sum(dim=1).tolist()
+    prompt_length = input_ids.size(1)
     completion_ids = []
-    for row, prompt_length in zip(generated_ids, prompt_lengths, strict=False):
-        completion_ids.append(row[int(prompt_length) :].tolist())
+    for row in generated_ids:
+        completion_ids.append(row[prompt_length:].tolist())
     return completion_ids
 
 
 def _decode_sequences(tokenizer, token_ids: list[list[int]]) -> list[str]:
     return tokenizer.batch_decode(token_ids, skip_special_tokens=True)
-
-
-def _repeat_prompts(
-    prompts: list[list[dict[str, str]]], num_generations: int
-) -> list[list[dict[str, str]]]:
-    repeated = []
-    for prompt in prompts:
-        for _ in range(num_generations):
-            repeated.append(prompt)
-    return repeated
 
 
 @torch.no_grad()
@@ -72,19 +62,13 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
         getattr(trainer, "args", None), "max_prompt_length", None
     )
     enable_verifier_reward = getattr(trainer, "enable_verifier_reward", True)
-    num_generations = int(getattr(trainer, "num_generations", 0) or 0)
-    if num_generations <= 0:
-        num_generations = int(
-            getattr(getattr(trainer, "args", None), "num_generations", 1)
-        )
     was_training = model.training
     model.eval()
 
     try:
-        rollout_prompts = _repeat_prompts(prompts, num_generations)
         rendered_prompts = [
             _render_qwen_prompt(tokenizer, prompt, enable_thinking=True)
-            for prompt in rollout_prompts
+            for prompt in prompts
         ]
         first_inputs = _tokenize_texts(
             tokenizer, rendered_prompts, device, max_length=max_prompt_length
@@ -108,7 +92,7 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             prompt_ids.append(ids[mask.bool()].tolist())
 
         completion_ids = _extract_completion_ids(
-            first_generated, first_inputs["attention_mask"]
+            first_generated, first_inputs["input_ids"]
         )
         first_completion_text = _decode_sequences(tokenizer, completion_ids)
 
@@ -117,14 +101,13 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
                 "prompt_ids": prompt_ids,
                 "completion_ids": completion_ids,
                 "logprobs": None,
+                "rendered_prompt_text": rendered_prompts,
                 "first_completion_text": first_completion_text,
             }
 
         self_eval_prompts = [
             build_self_eval_messages(prompt_messages=prompt, answer_text=completion)
-            for prompt, completion in zip(
-                rollout_prompts, first_completion_text, strict=False
-            )
+            for prompt, completion in zip(prompts, first_completion_text, strict=False)
         ]
         rendered_self_eval_prompts = [
             _render_qwen_prompt(tokenizer, prompt, enable_thinking=False)
@@ -149,7 +132,7 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
         )
 
         self_eval_completion_ids = _extract_completion_ids(
-            self_eval_generated, self_eval_inputs["attention_mask"]
+            self_eval_generated, self_eval_inputs["input_ids"]
         )
         self_eval_text = _decode_sequences(tokenizer, self_eval_completion_ids)
 
@@ -157,6 +140,7 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             "prompt_ids": prompt_ids,
             "completion_ids": completion_ids,
             "logprobs": None,
+            "rendered_prompt_text": rendered_prompts,
             "first_completion_text": first_completion_text,
             "self_eval_text": self_eval_text,
             "self_eval_prompt": self_eval_prompts,

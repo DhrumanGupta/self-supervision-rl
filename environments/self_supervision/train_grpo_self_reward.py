@@ -3,12 +3,17 @@ from __future__ import annotations
 import argparse
 
 from peft import LoraConfig
-from transformers import AutoTokenizer
-from trl import GRPOConfig, GRPOTrainer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import GRPOConfig
 
-from dataset import build_train_eval_datasets
-from rewards import RewardWeights, self_reward_function
-from rollout import self_reward_rollout
+from environments.self_supervision.dataset import build_train_eval_datasets
+from environments.self_supervision.logging_trainer import (
+    CompletionLogger,
+    LoggingGRPOTrainer,
+    wrap_reward_func,
+)
+from environments.self_supervision.rewards import RewardWeights, self_reward_function
+from environments.self_supervision.rollout import self_reward_rollout
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,12 +31,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train_examples", type=int, default=-1)
     parser.add_argument("--eval_examples", type=int, default=64)
     parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--report_to", type=str, default="none")
     parser.add_argument("--learning_rate", type=float, default=1e-5)
     parser.add_argument("--max_steps", type=int, default=100)
     parser.add_argument("--num_generations", type=int, default=4)
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
     parser.add_argument("--per_device_eval_batch_size", type=int, default=1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    parser.add_argument("--save_steps", type=int, default=25)
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=1.0)
@@ -51,16 +58,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--exact_match_weight", type=float, default=1.0)
     parser.add_argument("--formatting_weight", type=float, default=0.1)
     parser.add_argument("--verifier_weight", type=float, default=0.2)
-    parser.add_argument("--length_penalty_weight", type=float, default=0.0001)
+    parser.add_argument("--length_penalty_weight", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, padding_side="left")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype="auto")
 
     train_dataset, eval_dataset = build_train_eval_datasets(
         dataset_name=args.dataset_name,
@@ -98,10 +108,10 @@ def main() -> None:
         bf16=args.use_bf16,
         remove_unused_columns=False,
         logging_steps=1,
-        save_steps=50,
+        save_steps=args.save_steps,
         eval_strategy="steps" if eval_dataset is not None else "no",
-        eval_steps=50 if eval_dataset is not None else None,
-        report_to="none",
+        eval_steps=args.save_steps if eval_dataset is not None else None,
+        report_to=args.report_to,
         log_completions=True,
     )
     training_args.max_prompt_length = args.max_prompt_length
@@ -116,11 +126,19 @@ def main() -> None:
             task_type="CAUSAL_LM",
         )
 
-    def reward_wrapper(**kwargs):
+    completion_logger = CompletionLogger()
+
+    def configured_reward_func(**kwargs):
         return self_reward_function(reward_weights=reward_weights, **kwargs)
 
-    trainer = GRPOTrainer(
-        model=args.model_name,
+    configured_reward_func.__name__ = self_reward_function.__name__
+    reward_wrapper = wrap_reward_func(
+        configured_reward_func,
+        completion_logger=completion_logger,
+    )
+
+    trainer = LoggingGRPOTrainer(
+        model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -128,7 +146,9 @@ def main() -> None:
         reward_funcs=reward_wrapper,
         rollout_func=self_reward_rollout,
         peft_config=peft_config,
+        completion_logger=completion_logger,
     )
+    reward_wrapper.bind_trainer(trainer)
     trainer.enable_verifier_reward = args.enable_verifier_reward
     trainer.train()
     trainer.save_model(args.output_dir)

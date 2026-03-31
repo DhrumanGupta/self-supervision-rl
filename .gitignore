@@ -22,3 +22,8 @@ dist/
 # outputs from `prime eval run`
 ./outputs
 ./environments/*/outputs
+
+logs/
+outputs/
+
+plots/

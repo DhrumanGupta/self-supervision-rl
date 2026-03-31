@@ -1,6 +1,31 @@
 from __future__ import annotations
 
 
+MAIN_RESPONSE_INSTRUCTION = (
+    "Think and reason about the question inside <think> and </think> tags.\n"
+    "After closing </think>, write the final answer only as:\n"
+    "\\[\n"
+    "\\boxed{answer here}\n"
+    "\\]"
+)
+
+
+def build_main_prompt_messages(
+    prompt_messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    if prompt_messages and prompt_messages[0].get("role") == "system":
+        merged_system_message = dict(prompt_messages[0])
+        merged_system_message["content"] = (
+            f"{MAIN_RESPONSE_INSTRUCTION}\n\n{prompt_messages[0].get('content', '').strip()}"
+        ).strip()
+        return [merged_system_message, *prompt_messages[1:]]
+
+    return [
+        {"role": "system", "content": MAIN_RESPONSE_INSTRUCTION},
+        *prompt_messages,
+    ]
+
+
 def build_self_eval_messages(
     prompt_messages: list[dict[str, str]], answer_text: str
 ) -> list[dict[str, str]]:

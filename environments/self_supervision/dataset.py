@@ -1,27 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from datasets import Dataset, load_dataset
 
+from environments.self_supervision.prompts import build_main_prompt_messages
 
-TOY_ROWS = [
-    {
-        "prompt": [{"role": "user", "content": "What is 2 + 2?"}],
-        "answer": "4",
-        "info": {"task_type": "math", "source": "toy"},
-    },
-    {
-        "prompt": [{"role": "user", "content": "What is 7 * 8?"}],
-        "answer": "56",
-        "info": {"task_type": "math", "source": "toy"},
-    },
-    {
-        "prompt": [{"role": "user", "content": "Solve for x: 3x = 21"}],
-        "answer": "7",
-        "info": {"task_type": "math", "source": "toy"},
-    },
-]
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_prompt(
@@ -30,15 +17,19 @@ def _normalize_prompt(
     if prompt_key in row and row[prompt_key] is not None:
         prompt = row[prompt_key]
         if isinstance(prompt, list):
-            return prompt
-        return [{"role": "user", "content": str(prompt)}]
+            return build_main_prompt_messages(prompt)
+        return build_main_prompt_messages([{"role": "user", "content": str(prompt)}])
 
     if question_key in row and row[question_key] is not None:
-        return [{"role": "user", "content": str(row[question_key])}]
+        return build_main_prompt_messages(
+            [{"role": "user", "content": str(row[question_key])}]
+        )
 
     for fallback_key in ("problem", "question", "prompt"):
         if fallback_key in row and row[fallback_key] is not None:
-            return [{"role": "user", "content": str(row[fallback_key])}]
+            return build_main_prompt_messages(
+                [{"role": "user", "content": str(row[fallback_key])}]
+            )
 
     raise KeyError(f"No prompt field found in row keys: {sorted(row.keys())}")
 
@@ -48,6 +39,29 @@ def _normalize_answer(row: dict[str, Any], answer_key: str) -> str:
         if key in row and row[key] is not None:
             return str(row[key]).strip()
     raise KeyError(f"No answer field found in row keys: {sorted(row.keys())}")
+
+
+def _normalize_row(
+    row: dict[str, Any],
+    index: int,
+    *,
+    dataset_name: str,
+    split: str,
+    prompt_key: str,
+    question_key: str,
+    answer_key: str,
+) -> dict[str, Any]:
+    return {
+        "example_id": index,
+        "prompt": _normalize_prompt(
+            row, prompt_key=prompt_key, question_key=question_key
+        ),
+        "answer": _normalize_answer(row, answer_key=answer_key),
+        "info": {
+            "source_dataset": dataset_name,
+            "split": split,
+        },
+    }
 
 
 def build_dataset(
@@ -61,34 +75,34 @@ def build_dataset(
     num_examples: int = -1,
     seed: int = 42,
 ) -> Dataset:
-    if dataset_name == "toy":
-        rows = [dict(row) for row in TOY_ROWS]
-        if num_examples >= 0:
-            rows = rows[:num_examples]
-        return Dataset.from_list(rows)
-
     dataset = load_dataset(dataset_name, dataset_config, split=split)
     if hasattr(dataset, "shuffle"):
         dataset = dataset.shuffle(seed=seed)
     if num_examples >= 0 and hasattr(dataset, "select"):
         dataset = dataset.select(range(min(num_examples, len(dataset))))
 
-    rows = []
-    for index, row in enumerate(dataset):
-        rows.append(
-            {
-                "example_id": index,
-                "prompt": _normalize_prompt(
-                    row, prompt_key=prompt_key, question_key=question_key
-                ),
-                "answer": _normalize_answer(row, answer_key=answer_key),
-                "info": {
-                    "source_dataset": dataset_name,
-                    "split": split,
-                },
-            }
+    remove_columns = (
+        list(dataset.column_names) if hasattr(dataset, "column_names") else None
+    )
+
+    def normalize_row(row: dict[str, Any], index: int) -> dict[str, Any]:
+        return _normalize_row(
+            row,
+            index,
+            dataset_name=dataset_name,
+            split=split,
+            prompt_key=prompt_key,
+            question_key=question_key,
+            answer_key=answer_key,
         )
-    return Dataset.from_list(rows)
+
+    map_kwargs = {
+        "with_indices": True,
+        "desc": f"Normalizing {dataset_name}[{split}]",
+    }
+    if remove_columns is not None:
+        map_kwargs["remove_columns"] = remove_columns
+    return dataset.map(normalize_row, **map_kwargs)
 
 
 def build_train_eval_datasets(
@@ -126,7 +140,14 @@ def build_train_eval_datasets(
             num_examples=eval_examples,
             seed=seed + 1,
         )
-    except Exception:
+    except (FileNotFoundError, ValueError) as error:
+        logger.warning(
+            "Skipping eval dataset build for %s[%s]: %s: %s",
+            dataset_name,
+            eval_split,
+            type(error).__name__,
+            error,
+        )
         eval_dataset = None
 
     return train_dataset, eval_dataset

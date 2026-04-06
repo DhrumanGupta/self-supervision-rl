@@ -31,6 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train_examples", type=int, default=-1)
     parser.add_argument("--eval_examples", type=int, default=64)
     parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help="Checkpoint directory to resume training from.",
+    )
     parser.add_argument("--report_to", type=str, default="none")
     parser.add_argument("--learning_rate", type=float, default=1e-5)
     parser.add_argument("--max_steps", type=int, default=100)
@@ -150,7 +156,7 @@ def main() -> None:
     )
     reward_wrapper.bind_trainer(trainer)
     trainer.enable_verifier_reward = args.enable_verifier_reward
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(args.output_dir)
 
 

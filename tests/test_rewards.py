@@ -13,8 +13,28 @@ from environments.self_supervision.rewards import RewardWeights, self_reward_fun
 
 
 class SelfRewardFunctionTests(unittest.TestCase):
+    def test_missing_think_close_tag_zeroes_positive_reward_but_keeps_length_penalty(
+        self,
+    ) -> None:
+        completion = r"\[ \boxed{0} \]"
+        rewards = self_reward_function(
+            prompts=[[{"role": "user", "content": "question"}]],
+            completions=[completion],
+            answer=["0"],
+            rendered_prompt_text=["question <think>"],
+            first_completion_text=[completion],
+            reward_weights=RewardWeights(
+                exact_match=1.0,
+                formatting=0.1,
+                verifier=0.2,
+                length_penalty=0.5,
+                enable_verifier_reward=False,
+            ),
+        )
+        self.assertEqual(rewards, [-0.5 * len(completion)])
+
     def test_exact_match_accepts_function_style_assignment(self) -> None:
-        completion = r"<think>work here</think> \[ \boxed{f(x)=0} \]"
+        completion = r"work here</think> \[ \boxed{f(x)=0} \]"
         rewards = self_reward_function(
             prompts=[[{"role": "user", "content": "question"}]],
             completions=[completion],
@@ -32,7 +52,7 @@ class SelfRewardFunctionTests(unittest.TestCase):
         self.assertEqual(rewards, [1.0])
 
     def test_exact_match_rejects_expression_equation_rhs_only(self) -> None:
-        completion = r"<think>work here</think> \[ \boxed{x+1=2} \]"
+        completion = r"work here</think> \[ \boxed{x+1=2} \]"
         rewards = self_reward_function(
             prompts=[[{"role": "user", "content": "question"}]],
             completions=[completion],
@@ -50,7 +70,7 @@ class SelfRewardFunctionTests(unittest.TestCase):
         self.assertEqual(rewards, [0.0])
 
     def test_exact_match_accepts_symbolic_fraction_equivalence(self) -> None:
-        completion = r"<think>work here</think> \[ \boxed{0.5} \]"
+        completion = r"work here</think> \[ \boxed{0.5} \]"
         rewards = self_reward_function(
             prompts=[[{"role": "user", "content": "question"}]],
             completions=[completion],
@@ -68,7 +88,7 @@ class SelfRewardFunctionTests(unittest.TestCase):
         self.assertEqual(rewards, [1.0])
 
     def test_exact_match_accepts_tuple_equivalence(self) -> None:
-        completion = r"<think>work here</think> \[ \boxed{(1,0.5)} \]"
+        completion = r"work here</think> \[ \boxed{(1,0.5)} \]"
         rewards = self_reward_function(
             prompts=[[{"role": "user", "content": "question"}]],
             completions=[completion],
@@ -86,7 +106,7 @@ class SelfRewardFunctionTests(unittest.TestCase):
         self.assertEqual(rewards, [1.0])
 
     def test_exact_match_accepts_matrix_equivalence(self) -> None:
-        completion = r"<think>work here</think> \[ \boxed{\begin{pmatrix}1 & 0.5 \\ 3 & 4\end{pmatrix}} \]"
+        completion = r"work here</think> \[ \boxed{\begin{pmatrix}1 & 0.5 \\ 3 & 4\end{pmatrix}} \]"
         rewards = self_reward_function(
             prompts=[[{"role": "user", "content": "question"}]],
             completions=[completion],

@@ -130,12 +130,15 @@ def self_reward_function(
         completion_length = (
             len(token_ids) if token_ids is not None else len(completion_text or "")
         )
-        total = (
+        base_reward = (
             weights.exact_match * exact_match
             + weights.formatting * formatting_score
             + weights.verifier * verifier_score
-            - weights.length_penalty * completion_length
         )
+        if formatting_score == 0.0:
+            base_reward = 0.0
+
+        total = base_reward - weights.length_penalty * completion_length
         rewards.append(float(total))
         exact_scores.append(exact_match)
         formatting_scores.append(formatting_score)

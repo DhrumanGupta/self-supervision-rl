@@ -31,13 +31,34 @@ def _tokenize_texts(
     return {key: value.to(device) for key, value in batch.items()}
 
 
+def _trim_completion_ids(
+    token_ids: list[int], *, eos_token_id: int | None, pad_token_id: int | None
+) -> list[int]:
+    trimmed_ids = []
+    for token_id in token_ids:
+        if token_id == eos_token_id or token_id == pad_token_id:
+            break
+        trimmed_ids.append(token_id)
+    return trimmed_ids
+
+
 def _extract_completion_ids(
-    generated_ids: torch.Tensor, input_ids: torch.Tensor
+    generated_ids: torch.Tensor,
+    input_ids: torch.Tensor,
+    *,
+    eos_token_id: int | None = None,
+    pad_token_id: int | None = None,
 ) -> list[list[int]]:
     prompt_length = input_ids.size(1)
     completion_ids = []
     for row in generated_ids:
-        completion_ids.append(row[prompt_length:].tolist())
+        completion_ids.append(
+            _trim_completion_ids(
+                row[prompt_length:].tolist(),
+                eos_token_id=eos_token_id,
+                pad_token_id=pad_token_id,
+            )
+        )
     return completion_ids
 
 
@@ -92,7 +113,10 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             prompt_ids.append(ids[mask.bool()].tolist())
 
         completion_ids = _extract_completion_ids(
-            first_generated, first_inputs["input_ids"]
+            first_generated,
+            first_inputs["input_ids"],
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
         )
         first_completion_text = _decode_sequences(tokenizer, completion_ids)
 
@@ -132,7 +156,10 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
         )
 
         self_eval_completion_ids = _extract_completion_ids(
-            self_eval_generated, self_eval_inputs["input_ids"]
+            self_eval_generated,
+            self_eval_inputs["input_ids"],
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
         )
         self_eval_text = _decode_sequences(tokenizer, self_eval_completion_ids)
 

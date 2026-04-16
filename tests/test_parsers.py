@@ -12,8 +12,10 @@ from environments.self_supervision.parsers import (
     extract_final_answer,
     extract_last_boxed_answer,
     has_valid_think_format,
-    math_answers_equal,
-    normalize_math_answer,
+    match_answers_hybrid,
+    normalize_exact_answer,
+    parse_confidence_label,
+    parse_correctness_label,
 )
 
 
@@ -89,47 +91,41 @@ class ThinkFormatTests(unittest.TestCase):
         )
 
 
-class NormalizeMathAnswerTests(unittest.TestCase):
-    def test_normalizes_deepseek_style_fraction_shorthand(self) -> None:
-        self.assertEqual(normalize_math_answer(r"\frac12"), r"\frac{1}{2}")
+class VerifierLabelParserTests(unittest.TestCase):
+    def test_parses_correctness_label(self) -> None:
+        self.assertEqual(parse_correctness_label("CORRECTNESS: YES"), 1.0)
 
-    def test_normalizes_display_wrappers_and_formatting_commands(self) -> None:
-        text = r"\[ \left( \mathbf{0.0} \right) \]"
-        self.assertEqual(normalize_math_answer(text), "(0)")
+    def test_parses_confidence_label(self) -> None:
+        self.assertEqual(parse_confidence_label("CONFIDENCE: LOW"), 0.0)
 
 
-class MathAnswersEqualTests(unittest.TestCase):
-    def test_matches_function_style_assignment_to_bare_answer(self) -> None:
-        self.assertTrue(math_answers_equal("f(x) = 0", "0"))
+class AnswerMatchingTests(unittest.TestCase):
+    def test_normalize_exact_answer_canonicalizes_simple_latex_variants(self) -> None:
+        self.assertEqual(
+            normalize_exact_answer(r" \left( \dfrac{1}{2} \right) "),
+            r"(\frac{1}{2})",
+        )
 
-    def test_matches_short_assignment_to_bare_answer(self) -> None:
-        self.assertTrue(math_answers_equal("x = \\frac{1}{2}", r"\frac{1}{2}"))
+    def test_match_answers_hybrid_accepts_boolean_literals(self) -> None:
+        self.assertEqual(match_answers_hybrid("Yes", "YES"), (1.0, False))
 
-    def test_does_not_match_real_equation_to_rhs(self) -> None:
-        self.assertFalse(math_answers_equal("x + 1 = 2", "2"))
+    def test_match_answers_hybrid_accepts_semantic_fraction_equivalence(self) -> None:
+        self.assertEqual(match_answers_hybrid(r"\frac{1}{2}", "0.5"), (1.0, False))
 
-    def test_matches_numeric_equivalence(self) -> None:
-        self.assertTrue(math_answers_equal("2.000", "2"))
+    def test_match_answers_hybrid_accepts_equation_style_assignment(self) -> None:
+        self.assertEqual(match_answers_hybrid("2", "x+1=2"), (1.0, False))
 
-    def test_matches_percentage_flexibility(self) -> None:
-        self.assertTrue(math_answers_equal("0.5", "50%"))
+    def test_match_answers_hybrid_falls_back_to_exact_for_unparseable_symbolic_forms(
+        self,
+    ) -> None:
+        self.assertEqual(
+            match_answers_hybrid(r"O(n^{\log_2 6})", r"O(n^{\log_2 6})"), (1.0, False)
+        )
 
-    def test_matches_symbolic_fraction_equivalence(self) -> None:
-        self.assertTrue(math_answers_equal("0.5", r"\frac{1}{2}"))
-
-    def test_matches_tuple_elementwise(self) -> None:
-        self.assertTrue(math_answers_equal("(1, 0.5)", r"(1, \frac{1}{2})"))
-
-    def test_rejects_tuple_arity_mismatch(self) -> None:
-        self.assertFalse(math_answers_equal("(1, 2)", "(1, 2, 3)"))
-
-    def test_matches_matrix_elementwise(self) -> None:
-        predicted = r"\begin{pmatrix} 1 & 0.5 \\ 3 & 4 \end{pmatrix}"
-        gold = r"\begin{pmatrix} 1 & \frac{1}{2} \\ 3 & 4.0 \end{pmatrix}"
-        self.assertTrue(math_answers_equal(predicted, gold))
-
-    def test_matches_symbolically_equivalent_equations(self) -> None:
-        self.assertTrue(math_answers_equal("x=1", "x-1=0"))
+    def test_match_answers_hybrid_rejects_actual_mismatch(self) -> None:
+        self.assertEqual(
+            match_answers_hybrid(r"\frac{1}{2}", r"\frac{2}{3}"), (0.0, False)
+        )
 
 
 if __name__ == "__main__":

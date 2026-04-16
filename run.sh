@@ -19,6 +19,8 @@ mkdir -p "$(dirname "$log_path")"
 
 nohup "$@" > "$log_path" 2>&1 < /dev/null &
 
+runner_pid=$!
 echo "Running $* with nohup, logging to $log_path"
+echo "Runner PID: $runner_pid"
 echo "Command: $*"
 echo "Path: $log_path"

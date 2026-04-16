@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import torch
@@ -66,8 +67,14 @@ def _decode_sequences(tokenizer, token_ids: list[list[int]]) -> list[str]:
     return tokenizer.batch_decode(token_ids, skip_special_tokens=True)
 
 
+def _log_timing_metric(trainer, name: str, duration_seconds: float) -> None:
+    if hasattr(trainer, "_log_metric"):
+        trainer._log_metric(name, float(duration_seconds))
+
+
 @torch.no_grad()
 def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[str, Any]:
+    rollout_start_time = time.perf_counter()
     tokenizer = (
         trainer.processing_class.tokenizer
         if hasattr(trainer.processing_class, "tokenizer")
@@ -94,6 +101,7 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
         first_inputs = _tokenize_texts(
             tokenizer, rendered_prompts, device, max_length=max_prompt_length
         )
+        first_generate_start_time = time.perf_counter()
         first_generated = model.generate(
             **first_inputs,
             max_new_tokens=trainer.max_completion_length,
@@ -104,6 +112,11 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             repetition_penalty=trainer.repetition_penalty,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
+        )
+        _log_timing_metric(
+            trainer,
+            "profiling/rollout/main_generate_s",
+            time.perf_counter() - first_generate_start_time,
         )
 
         prompt_ids = []
@@ -118,13 +131,14 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             eos_token_id=tokenizer.eos_token_id,
             pad_token_id=tokenizer.pad_token_id,
         )
+        logprobs = None
         first_completion_text = _decode_sequences(tokenizer, completion_ids)
 
         if not enable_verifier_reward:
             return {
                 "prompt_ids": prompt_ids,
                 "completion_ids": completion_ids,
-                "logprobs": None,
+                "logprobs": logprobs,
                 "rendered_prompt_text": rendered_prompts,
                 "first_completion_text": first_completion_text,
             }
@@ -143,16 +157,22 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
             device,
             max_length=max_prompt_length,
         )
+        self_eval_generate_start_time = time.perf_counter()
         self_eval_generated = model.generate(
             **self_eval_inputs,
-            max_new_tokens=min(128, trainer.max_completion_length),
+            max_new_tokens=trainer.max_completion_length,
             do_sample=True,
-            temperature=max(0.2, trainer.temperature),
+            temperature=trainer.temperature,
             top_p=trainer.top_p,
             top_k=trainer.top_k,
             repetition_penalty=trainer.repetition_penalty,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
+        )
+        _log_timing_metric(
+            trainer,
+            "profiling/rollout/self_eval_generate_s",
+            time.perf_counter() - self_eval_generate_start_time,
         )
 
         self_eval_completion_ids = _extract_completion_ids(
@@ -166,12 +186,17 @@ def self_reward_rollout(prompts: list[list[dict[str, str]]], trainer) -> dict[st
         return {
             "prompt_ids": prompt_ids,
             "completion_ids": completion_ids,
-            "logprobs": None,
+            "logprobs": logprobs,
             "rendered_prompt_text": rendered_prompts,
             "first_completion_text": first_completion_text,
             "self_eval_text": self_eval_text,
             "self_eval_prompt": self_eval_prompts,
         }
     finally:
+        _log_timing_metric(
+            trainer,
+            "profiling/rollout/total_s",
+            time.perf_counter() - rollout_start_time,
+        )
         if was_training:
             model.train()

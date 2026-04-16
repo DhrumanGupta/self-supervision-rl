@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from environments.self_supervision.parsers import (
     extract_final_answer,
     has_valid_think_format,
-    math_answers_equal,
+    match_answers_hybrid,
     parse_confidence_label,
     parse_correctness_label,
 )
@@ -36,6 +36,20 @@ def _validate_batch_lengths(**batch_values) -> None:
     raise ValueError(f"Reward batch length mismatch: {lengths}")
 
 
+def _compute_exact_match_scores(
+    predicted_answers: list[str], gold_answers: list[str]
+) -> tuple[list[float], list[float]]:
+    exact_match_scores = []
+    exact_match_skipped = []
+    for gold_answer, predicted_answer in zip(
+        gold_answers, predicted_answers, strict=True
+    ):
+        exact_match_score, skipped = match_answers_hybrid(gold_answer, predicted_answer)
+        exact_match_scores.append(exact_match_score)
+        exact_match_skipped.append(float(skipped))
+    return exact_match_scores, exact_match_skipped
+
+
 def self_reward_function(
     prompts,
     completions,
@@ -53,6 +67,8 @@ def self_reward_function(
     verifier_enabled = weights.enable_verifier_reward
     rewards = []
     exact_scores = []
+    exact_score_values = []
+    exact_match_skipped = []
     formatting_scores = []
     verifier_scores = []
     predicted_answers = []
@@ -89,32 +105,49 @@ def self_reward_function(
         completion_ids=completion_ids,
     )
 
-    for prompt_text, completion_text, probe_text, gold, token_ids in zip(
+    gold_answers = [str(item).strip() for item in answer]
+    extracted_answers = [
+        extract_final_answer(completion_text)
+        for completion_text in first_completion_text
+    ]
+    exact_match_scores, exact_match_skipped_flags = _compute_exact_match_scores(
+        extracted_answers, gold_answers
+    )
+
+    for (
+        prompt_text,
+        completion_text,
+        probe_text,
+        token_ids,
+        predicted_answer,
+        exact_match_score,
+        exact_match_skipped_flag,
+    ) in zip(
         rendered_prompt_text,
         first_completion_text,
         self_eval_text,
-        answer,
         completion_ids,
+        extracted_answers,
+        exact_match_scores,
+        exact_match_skipped_flags,
         strict=True,
     ):
         formatting_score = (
             1.0 if has_valid_think_format(prompt_text, completion_text or "") else 0.0
         )
-        predicted_answer = extract_final_answer(completion_text)
-        exact_match = (
-            1.0 if math_answers_equal(predicted_answer, str(gold).strip()) else 0.0
-        )
+        exact_match_value = float(exact_match_score)
+        accuracy_skipped = bool(exact_match_skipped_flag)
         said_correct = 0.0
         confidence = 0.0
 
-        if verifier_enabled:
+        if verifier_enabled and not accuracy_skipped:
             said_correct = parse_correctness_label(probe_text)
-            self_consistency = 1.0 if said_correct == exact_match else 0.0
+            self_consistency = 1.0 if said_correct == exact_match_value else 0.0
 
             confidence = parse_confidence_label(probe_text)
-            if exact_match == 1.0 and said_correct == 1.0:
+            if exact_match_value == 1.0 and said_correct == 1.0:
                 confidence_score = 1.0 if confidence == 1.0 else 0.5
-            elif exact_match == 0.0 and said_correct == 0.0:
+            elif exact_match_value == 0.0 and said_correct == 0.0:
                 confidence_score = 1.0 if confidence == 0.0 else 0.5
             else:
                 confidence_score = 0.0
@@ -131,7 +164,7 @@ def self_reward_function(
             len(token_ids) if token_ids is not None else len(completion_text or "")
         )
         base_reward = (
-            weights.exact_match * exact_match
+            weights.exact_match * exact_match_value
             + weights.formatting * formatting_score
             + weights.verifier * verifier_score
         )
@@ -140,7 +173,9 @@ def self_reward_function(
 
         total = base_reward - weights.length_penalty * completion_length
         rewards.append(float(total))
-        exact_scores.append(exact_match)
+        exact_scores.append(exact_match_value)
+        exact_score_values.append(exact_match_value)
+        exact_match_skipped.append(float(accuracy_skipped))
         formatting_scores.append(formatting_score)
         verifier_scores.append(verifier_score)
         completion_lengths.append(completion_length)
@@ -153,6 +188,7 @@ def self_reward_function(
         log_extra("predicted_answer", predicted_answers)
         log_extra("completion_length", completion_lengths)
         log_extra("exact_match", exact_scores)
+        log_extra("exact_match_skipped", exact_match_skipped)
         log_extra("formatting_score", formatting_scores)
         log_extra("verifier_score", verifier_scores)
         log_extra("verifier_correctness_label", correctness_labels)
@@ -160,7 +196,14 @@ def self_reward_function(
 
     if log_metric and rewards:
         log_metric("self_reward/verifier_enabled", float(verifier_enabled))
-        log_metric("self_reward/exact_match", sum(exact_scores) / len(exact_scores))
+        log_metric(
+            "self_reward/exact_match",
+            sum(exact_score_values) / len(exact_score_values),
+        )
+        log_metric(
+            "self_reward/exact_match_skipped",
+            sum(exact_match_skipped) / len(exact_match_skipped),
+        )
         log_metric(
             "self_reward/formatting", sum(formatting_scores) / len(formatting_scores)
         )

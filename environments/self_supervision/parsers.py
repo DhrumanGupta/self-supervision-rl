@@ -14,6 +14,10 @@ WRAPPED_LATEX_EXTRACTION_CONFIG = [LatexExtractionConfig(boxed_match_priority=0)
 REASONING_TOKEN_PATTERN = re.compile(r"(?:\\[A-Za-z]+|[A-Za-z0-9]+)")
 MIN_REASONING_NONSPACE_CHARS = 12
 MIN_REASONING_TOKENS = 3
+LATEX_TEXT_WRAPPER_PATTERN = re.compile(
+    r"^\\(?:text|mathrm)\s*\{\s*(.*?)\s*\}$",
+    flags=re.IGNORECASE,
+)
 
 
 def extract_scored_text(text: str) -> str:
@@ -106,11 +110,32 @@ def extract_final_answer(text: str) -> str:
 
 
 def is_literal_answer(text: str) -> bool:
-    return (text or "").strip().lower() in LITERAL_ANSWERS
+    return _canonicalize_boolean_literal(text) is not None
+
+
+def _canonicalize_boolean_literal(text: str) -> str | None:
+    normalized = (text or "").strip()
+    if not normalized:
+        return None
+
+    wrapped_match = LATEX_TEXT_WRAPPER_PATTERN.fullmatch(normalized)
+    if wrapped_match:
+        normalized = wrapped_match.group(1).strip()
+
+    lowered = normalized.lower()
+    if lowered in {"yes", "true"}:
+        return "yes"
+    if lowered in {"no", "false"}:
+        return "no"
+    return None
 
 
 def normalize_exact_answer(text: str) -> str:
     normalized = (text or "").strip()
+
+    canonical_literal = _canonicalize_boolean_literal(normalized)
+    if canonical_literal is not None:
+        return canonical_literal
 
     while True:
         updated = normalized
@@ -125,14 +150,19 @@ def normalize_exact_answer(text: str) -> str:
             break
         normalized = updated
 
+    canonical_literal = _canonicalize_boolean_literal(normalized)
+    if canonical_literal is not None:
+        return canonical_literal
+
     normalized = normalized.replace(r"\dfrac", r"\frac")
     normalized = normalized.replace(r"\tfrac", r"\frac")
     normalized = normalized.replace(r"\left", "")
     normalized = normalized.replace(r"\right", "")
     normalized = "".join(normalized.split())
 
-    if normalized.lower() in LITERAL_ANSWERS:
-        return normalized.lower()
+    canonical_literal = _canonicalize_boolean_literal(normalized)
+    if canonical_literal is not None:
+        return canonical_literal
     return normalized
 
 

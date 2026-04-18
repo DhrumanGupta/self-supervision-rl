@@ -8,13 +8,22 @@ dependencies = [
     "causal-conv1d>=1.6.1",
     "datasets>=4.8.3",
     "fastapi>=0.135.3",
+    "flash-attn>=2.8.3",
     "flash-linear-attention>=0.4.2",
+    "huggingface-hub==1.10.0",
+    "liger-kernel>=0.7.0",
     "math-verify>=0.9.0",
     "matplotlib>=3.10.8",
     "peft>=0.18.1",
     "torch>=2.10.0",
-    "transformers>=5.5.0",
-    "trl>=1.0.0",
+    "transformers==5.5.4",
+    "trl==1.2.0",
     "uvicorn>=0.44.0",
+    "vllm==0.18.0",
     "wandb>=0.25.1",
+]
+
+[tool.uv]
+override-dependencies = [
+    "transformers==5.5.4",
 ]

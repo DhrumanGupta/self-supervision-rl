@@ -117,6 +117,15 @@ class AnswerMatchingTests(unittest.TestCase):
     def test_match_answers_hybrid_accepts_boolean_literals(self) -> None:
         self.assertEqual(match_answers_hybrid("Yes", "YES"), (1.0, False))
 
+    def test_match_answers_hybrid_accepts_text_wrapped_true_as_yes(self) -> None:
+        self.assertEqual(match_answers_hybrid("Yes", r"\text{True}"), (1.0, False))
+
+    def test_match_answers_hybrid_accepts_text_wrapped_yes(self) -> None:
+        self.assertEqual(match_answers_hybrid("Yes", r"\text{Yes}"), (1.0, False))
+
+    def test_match_answers_hybrid_rejects_text_wrapped_no_for_yes(self) -> None:
+        self.assertEqual(match_answers_hybrid("Yes", r"\text{No}"), (0.0, False))
+
     def test_match_answers_hybrid_accepts_semantic_fraction_equivalence(self) -> None:
         self.assertEqual(match_answers_hybrid(r"\frac{1}{2}", "0.5"), (1.0, False))
 

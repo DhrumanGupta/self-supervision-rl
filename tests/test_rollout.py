@@ -77,6 +77,17 @@ class RolloutProfilingTests(unittest.TestCase):
             [4.0],
         )
         self.assertEqual(trainer.logged_metrics["profiling/rollout/total_s"], [12.0])
+        self.assertEqual(trainer.vllm_generation.calls[0]["num_generations"], 4)
+        self.assertEqual(trainer.vllm_generation.calls[1]["num_generations"], 1)
+
+    def test_flattens_sampled_logprobs_from_vllm(self) -> None:
+        trainer = _FakeTrainer(enable_verifier_reward=False)
+
+        result = self_reward_rollout(
+            [[{"role": "user", "content": "What is 2+2?"}]], trainer
+        )
+
+        self.assertEqual(result["logprobs"], [[-0.1, -0.2]])
 
     def test_logs_rollout_timings_without_self_eval(self) -> None:
         trainer = _FakeTrainer(enable_verifier_reward=False)
@@ -96,6 +107,13 @@ class RolloutProfilingTests(unittest.TestCase):
             "profiling/rollout/self_eval_generate_s", trainer.logged_metrics
         )
         self.assertEqual(trainer.logged_metrics["profiling/rollout/total_s"], [4.0])
+
+    def test_uses_eval_generation_count_when_model_is_not_training(self) -> None:
+        trainer = _FakeTrainer(enable_verifier_reward=False, model_training=False)
+
+        self_reward_rollout([[{"role": "user", "content": "What is 2+2?"}]], trainer)
+
+        self.assertEqual(trainer.vllm_generation.calls[0]["num_generations"], 2)
 
 
 class _FakeTokenizer:
@@ -125,39 +143,46 @@ class _FakeTokenizer:
 
 
 class _FakeModel:
+    def __init__(self, *, training: bool) -> None:
+        self.training = training
+
+
+class _FakeVLLMGeneration:
     def __init__(self) -> None:
-        self.training = True
-        self._parameter = torch.nn.Parameter(torch.zeros(1))
-        self._generate_call_count = 0
+        self._call_count = 0
+        self.calls: list[dict[str, object]] = []
 
-    def parameters(self):
-        yield self._parameter
-
-    def eval(self) -> None:
-        self.training = False
-
-    def train(self) -> None:
-        self.training = True
-
-    def generate(self, **kwargs):
-        del kwargs
-        self._generate_call_count += 1
-        completion_token = 10 if self._generate_call_count == 1 else 20
-        return torch.tensor([[11, 12, completion_token, 99]], dtype=torch.long)
+    def generate(self, *, prompts, images, num_generations, profiler=None):
+        del images, profiler
+        self._call_count += 1
+        self.calls.append(
+            {
+                "prompts": prompts,
+                "num_generations": num_generations,
+            }
+        )
+        if self._call_count == 1:
+            return prompts, [[10, 99]], [[[-0.1], [-0.2]]], [[[10], [99]]]
+        return prompts, [[20, 99]], [[[-0.3], [-0.4]]], [[[20], [99]]]
 
 
 class _FakeTrainer:
-    def __init__(self, *, enable_verifier_reward: bool) -> None:
+    def __init__(
+        self, *, enable_verifier_reward: bool, model_training: bool = True
+    ) -> None:
         self.processing_class = _FakeTokenizer()
-        self.model = _FakeModel()
-        self.accelerator = SimpleNamespace(unwrap_model=lambda model: model)
+        self.model = _FakeModel(training=model_training)
+        self.accelerator = SimpleNamespace(device=torch.device("cpu"))
         self.args = SimpleNamespace(max_prompt_length=128)
         self.enable_verifier_reward = enable_verifier_reward
+        self.num_generations = 4
+        self.num_generations_eval = 2
         self.max_completion_length = 32
         self.temperature = 1.0
         self.top_p = 1.0
         self.top_k = 50
         self.repetition_penalty = 1.0
+        self.vllm_generation = _FakeVLLMGeneration()
         self.logged_metrics: dict[str, list[float]] = {}
 
     def _log_metric(self, name: str, value: float) -> None:

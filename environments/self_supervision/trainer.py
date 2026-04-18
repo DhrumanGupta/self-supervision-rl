@@ -10,6 +10,8 @@ from trl.trainer import grpo_trainer as trl_grpo_trainer
 
 
 class SelfSupervisionGRPOTrainer(GRPOTrainer):
+    completion_logging_steps = 1
+
     def _generate_and_score_completions(self, inputs):
         output = super()._generate_and_score_completions(inputs)
 
@@ -59,7 +61,11 @@ class SelfSupervisionGRPOTrainer(GRPOTrainer):
         Trainer.log(self, logs, start_time)
         self._metrics[mode].clear()
 
-        if self.accelerator.is_main_process and self.log_completions:
+        should_log_completions = (
+            self.log_completions
+            and self.state.global_step % self.completion_logging_steps == 0
+        )
+        if self.accelerator.is_main_process and should_log_completions:
             logging_backends = []
             if (
                 self.args.report_to

@@ -64,6 +64,7 @@ class SelfSupervisionTrainerLogTests(unittest.TestCase):
         }
         trainer.accelerator = SimpleNamespace(is_main_process=True)
         trainer.log_completions = True
+        trainer.completion_logging_steps = 1
         trainer.log_unique_prompts = False
         trainer.model = SimpleNamespace(training=True)
         trainer.state = SimpleNamespace(epoch=None, global_step=7, log_history=[])
@@ -87,6 +88,42 @@ class SelfSupervisionTrainerLogTests(unittest.TestCase):
         to_parquet.assert_called_once()
         parquet_path = to_parquet.call_args.args[0]
         self.assertTrue(parquet_path.endswith("completions/train/completions_00007.parquet"))
+
+    def test_skips_completion_logging_until_cadence_boundary(self) -> None:
+        trainer = object.__new__(SelfSupervisionGRPOTrainer)
+        trainer._metrics = {"train": defaultdict(list), "eval": defaultdict(list)}
+        trainer._logs = {
+            "images": deque(),
+            "prompt": deque(["prompt"]),
+            "completion": deque(["completion"]),
+            "rewards": defaultdict(deque),
+            "advantages": deque([0.5]),
+            "extra": defaultdict(deque),
+        }
+        trainer.accelerator = SimpleNamespace(is_main_process=True)
+        trainer.log_completions = True
+        trainer.completion_logging_steps = 5
+        trainer.log_unique_prompts = False
+        trainer.model = SimpleNamespace(training=True)
+        trainer.state = SimpleNamespace(epoch=None, global_step=7, log_history=[])
+        trainer.control = object()
+        trainer.callback_handler = SimpleNamespace(
+            on_log=lambda args, state, control, logs: control
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer.args = SimpleNamespace(
+                include_num_input_tokens_seen="no",
+                output_dir=tmpdir,
+                report_to=[],
+            )
+            with patch(
+                "environments.self_supervision.trainer.trl_grpo_trainer.pd.DataFrame.to_parquet"
+            ) as to_parquet:
+                trainer.log({"loss": 1.23})
+
+        self.assertEqual(trainer.state.log_history[-1]["loss"], 1.23)
+        to_parquet.assert_not_called()
 
 
 if __name__ == "__main__":

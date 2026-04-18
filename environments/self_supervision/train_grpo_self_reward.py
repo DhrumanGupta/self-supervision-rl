@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import re
 
 from peft import LoraConfig
@@ -28,8 +29,31 @@ from environments.self_supervision.trainer import (
 )
 
 
-SUPPORTED_MODEL_NAME_PATTERN = re.compile(r"^Qwen/Qwen3\.5-[^/]+-Base$")
+SUPPORTED_MODEL_NAME_PATTERN = re.compile(r"^Qwen/Qwen3(?:\.5)?-[^/]+$")
 DEEP_MATH_DATASET_NAME = "zwhe99/DeepMath-103K"
+DEFAULT_VLLM_SERVER_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_VLLM_GROUP_PORT = 51216
+MAX_PROMPT_LENGTH = 1024
+MAX_COMPLETION_LENGTH = 4096
+VLLM_PREFIX_MAPS = {
+    "Qwen3_5ForConditionalGeneration": {
+        "model.visual.": "visual.",
+        "lm_head.": "language_model.lm_head.",
+        "model.language_model.": "language_model.model.",
+    },
+    "Qwen3VLForConditionalGeneration": {
+        "model.visual.": "visual.",
+        "lm_head.": "language_model.lm_head.",
+        "model.language_model.": "language_model.model.",
+    },
+    "Qwen3_5ForCausalLM": {
+        "lm_head.": "language_model.lm_head.",
+        "model.": "language_model.model.",
+    },
+}
+VLLM_MODEL_TYPE_PREFIX_MAPS = {
+    "qwen3_5_text": VLLM_PREFIX_MAPS["Qwen3_5ForCausalLM"],
+}
 
 
 def validate_supported_model_name(model_name: str) -> None:
@@ -39,7 +63,7 @@ def validate_supported_model_name(model_name: str) -> None:
     raise ValueError(
         "Unsupported model_name "
         f"{model_name!r}. This training entrypoint currently supports only "
-        "Qwen/Qwen3.5-*-Base models because the custom rollout depends on "
+        "Qwen/Qwen3-* and Qwen/Qwen3.5-* models because the custom rollout depends on "
         "Qwen's apply_chat_template(..., enable_thinking=...) behavior."
     )
 
@@ -52,7 +76,7 @@ def parse_args() -> argparse.Namespace:
         "--model_name",
         type=str,
         required=True,
-        help="Supported: Qwen/Qwen3.5-*-Base",
+        help="Supported: Qwen/Qwen3-*, Qwen/Qwen3.5-*",
     )
     parser.add_argument("--dataset_name", type=str, default="toy")
     parser.add_argument("--dataset_config", type=str, default=None)
@@ -80,8 +104,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
     parser.add_argument("--save_steps", type=int, default=25)
     parser.add_argument("--eval_steps", type=int, default=100)
-    parser.add_argument("--max_prompt_length", type=int, default=1024)
-    parser.add_argument("--max_completion_length", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=50)
@@ -118,16 +140,92 @@ def should_enable_curriculum(args: argparse.Namespace) -> bool:
     return args.dataset_name == DEEP_MATH_DATASET_NAME and not args.disable_curriculum
 
 
+def _iter_vllm_patch_candidates(root_model) -> list[object]:
+    if root_model is None:
+        return []
+
+    candidates = []
+    stack = [root_model]
+    seen_ids = set()
+    while stack:
+        candidate = stack.pop(0)
+        if candidate is None or id(candidate) in seen_ids:
+            continue
+        seen_ids.add(id(candidate))
+        candidates.append(candidate)
+
+        for attr_name in ("model", "base_model"):
+            nested = getattr(candidate, attr_name, None)
+            if nested is not None and not inspect.ismethod(nested):
+                stack.append(nested)
+
+        get_base_model = getattr(candidate, "get_base_model", None)
+        if callable(get_base_model):
+            try:
+                stack.append(get_base_model())
+            except Exception:
+                pass
+
+    return candidates
+
+
+def _resolve_vllm_prefix_map(root_model):
+    for candidate in _iter_vllm_patch_candidates(root_model):
+        class_name = type(candidate).__name__
+        if class_name in VLLM_PREFIX_MAPS:
+            return VLLM_PREFIX_MAPS[class_name]
+
+        config = getattr(candidate, "config", None)
+        architectures = getattr(config, "architectures", None) or []
+        for architecture in architectures:
+            if architecture in VLLM_PREFIX_MAPS:
+                return VLLM_PREFIX_MAPS[architecture]
+
+        model_type = getattr(config, "model_type", None)
+        if model_type in VLLM_MODEL_TYPE_PREFIX_MAPS:
+            return VLLM_MODEL_TYPE_PREFIX_MAPS[model_type]
+
+    return None
+
+
+def patch_vllm_param_name_fix(trainer) -> bool:
+    root_model = getattr(getattr(trainer, "vllm_generation", None), "model", None)
+    if root_model is None:
+        root_model = getattr(trainer, "model", None)
+
+    hf_to_vllm_prefix = _resolve_vllm_prefix_map(root_model)
+    if hf_to_vllm_prefix is None or not hasattr(trainer, "vllm_generation"):
+        return False
+
+    original_fix = trainer.vllm_generation._fix_param_name_to_vllm
+
+    def _fix_param_name_to_vllm(name, extra_prefixes=None):
+        fixed_name = original_fix(name, extra_prefixes)
+        for prefix, new_prefix in hf_to_vllm_prefix.items():
+            if fixed_name.startswith(prefix):
+                return fixed_name.replace(prefix, new_prefix, 1)
+        return fixed_name
+
+    trainer.vllm_generation._fix_param_name_to_vllm = _fix_param_name_to_vllm
+    return True
+
+
 def main() -> None:
     args = parse_args()
     validate_supported_model_name(args.model_name)
     use_curriculum = should_enable_curriculum(args)
+    vllm_server_base_url = DEFAULT_VLLM_SERVER_BASE_URL
+    vllm_group_port = DEFAULT_VLLM_GROUP_PORT
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, padding_side="left")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype="auto")
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name,
+        torch_dtype="auto",
+        attn_implementation="flash_attention_2",
+    )
 
     eval_examples = -1 if use_curriculum else args.eval_examples
     train_dataset, eval_dataset = build_train_eval_datasets(
@@ -198,11 +296,16 @@ def main() -> None:
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        max_completion_length=args.max_completion_length,
+        max_completion_length=MAX_COMPLETION_LENGTH,
         temperature=args.temperature,
         top_p=args.top_p,
         top_k=args.top_k,
         bf16=args.use_bf16,
+        use_vllm=True,
+        vllm_mode="server",
+        vllm_server_base_url=vllm_server_base_url,
+        vllm_group_port=vllm_group_port,
+        use_liger_kernel=True,
         remove_unused_columns=False,
         logging_steps=1,
         save_steps=args.save_steps,
@@ -211,7 +314,7 @@ def main() -> None:
         report_to=args.report_to,
         log_completions=True,
     )
-    training_args.max_prompt_length = args.max_prompt_length
+    training_args.max_prompt_length = MAX_PROMPT_LENGTH
 
     peft_config = None
     if args.use_peft:
@@ -250,6 +353,8 @@ def main() -> None:
         trainer = SelfSupervisionGRPOTrainer(**trainer_kwargs)
 
     trainer.add_callback(ProfilingCallback(trainer))
+    trainer.completion_logging_steps = 5
+    patch_vllm_param_name_fix(trainer)
 
     trainer.enable_verifier_reward = args.enable_verifier_reward
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

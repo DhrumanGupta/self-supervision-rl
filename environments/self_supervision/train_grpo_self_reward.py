@@ -108,7 +108,6 @@ def parse_args() -> argparse.Namespace:
         help="Enable the auxiliary same-model verifier reward pass.",
     )
     parser.add_argument("--exact_match_weight", type=float, default=1.0)
-    parser.add_argument("--formatting_weight", type=float, default=0.1)
     parser.add_argument("--verifier_weight", type=float, default=0.2)
     parser.add_argument("--length_penalty_weight", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=42)
@@ -185,7 +184,6 @@ def main() -> None:
 
     reward_weights = RewardWeights(
         exact_match=args.exact_match_weight,
-        formatting=args.formatting_weight,
         verifier=args.verifier_weight,
         length_penalty=args.length_penalty_weight,
         enable_verifier_reward=args.enable_verifier_reward,

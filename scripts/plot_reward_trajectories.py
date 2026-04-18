@@ -20,7 +20,6 @@ REWARD_METRICS = [
     "self_reward/exact_match",
     "self_reward/formatting",
     "self_reward/verifier",
-    "self_reward/verifier_enabled",
 ]
 
 METRIC_LABELS = {
@@ -33,7 +32,6 @@ METRIC_LABELS = {
     "self_reward/exact_match": "Self Reward Exact Match",
     "self_reward/formatting": "Self Reward Formatting",
     "self_reward/verifier": "Self Reward Verifier",
-    "self_reward/verifier_enabled": "Self Reward Verifier Enabled",
 }
 
 

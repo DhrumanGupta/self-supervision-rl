@@ -10,6 +10,27 @@ from trl.trainer import grpo_trainer as trl_grpo_trainer
 
 
 class SelfSupervisionGRPOTrainer(GRPOTrainer):
+    def _generate_and_score_completions(self, inputs):
+        output = super()._generate_and_score_completions(inputs)
+
+        prompt_ids = output.get("prompt_ids")
+        prompt_mask = output.get("prompt_mask")
+        if prompt_ids is not None and prompt_mask is not None:
+            prompt_token_ids = [
+                ids[mask.bool()].tolist()
+                for ids, mask in zip(prompt_ids, prompt_mask, strict=True)
+            ]
+            prompts_text = self.processing_class.batch_decode(
+                prompt_token_ids,
+                skip_special_tokens=False,
+            )
+            gathered_prompts = trl_grpo_trainer.gather_object(prompts_text)
+            for _ in range(len(gathered_prompts)):
+                self._logs["prompt"].pop()
+            self._logs["prompt"].extend(gathered_prompts)
+
+        return output
+
     def record_step_metric(
         self,
         name: str,
@@ -29,7 +50,10 @@ class SelfSupervisionGRPOTrainer(GRPOTrainer):
             metrics[key] = sum(valid) / len(valid) if valid else None
 
         if mode == "eval":
-            metrics = {f"eval_{key}": val for key, val in metrics.items()}
+            metrics = {
+                (key if key.startswith("profiling/") else f"eval_{key}"): val
+                for key, val in metrics.items()
+            }
 
         logs = {**logs, **metrics}
         Trainer.log(self, logs, start_time)
@@ -47,6 +71,7 @@ class SelfSupervisionGRPOTrainer(GRPOTrainer):
                 logging_backends.append(trl_grpo_trainer.trackio)
 
             table = {
+                "mode": [mode] * len(self._logs["prompt"]),
                 "step": [self.state.global_step] * len(self._logs["prompt"]),
                 "prompt": self._logs["prompt"],
                 "completion": self._logs["completion"],
@@ -56,7 +81,7 @@ class SelfSupervisionGRPOTrainer(GRPOTrainer):
             }
 
             df_base = trl_grpo_trainer.pd.DataFrame(table)
-            completions_dir = os.path.join(self.args.output_dir, "completions")
+            completions_dir = os.path.join(self.args.output_dir, "completions", mode)
             os.makedirs(completions_dir, exist_ok=True)
             df_base.to_parquet(
                 os.path.join(

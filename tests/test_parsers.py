@@ -62,7 +62,7 @@ class ThinkFormatTests(unittest.TestCase):
         self.assertTrue(
             has_valid_think_format(
                 "question <think>",
-                r"work here</think> \[ \boxed{\frac{h^2}{m}} \]",
+                r"We reason carefully here</think> \[ \boxed{\frac{h^2}{m}} \]",
             )
         )
 
@@ -87,6 +87,14 @@ class ThinkFormatTests(unittest.TestCase):
             has_valid_think_format(
                 "question <think>",
                 r"work here</think> \[ \boxed{1} \]</think>",
+            )
+        )
+
+    def test_rejects_trivial_placeholder_reasoning(self) -> None:
+        self.assertFalse(
+            has_valid_think_format(
+                "question <think>",
+                r"compute</think> \[ \boxed{1} \]",
             )
         )
 

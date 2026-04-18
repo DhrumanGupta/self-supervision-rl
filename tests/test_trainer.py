@@ -85,6 +85,8 @@ class SelfSupervisionTrainerLogTests(unittest.TestCase):
 
         self.assertEqual(trainer.state.log_history[-1]["loss"], 1.23)
         to_parquet.assert_called_once()
+        parquet_path = to_parquet.call_args.args[0]
+        self.assertTrue(parquet_path.endswith("completions/train/completions_00007.parquet"))
 
 
 if __name__ == "__main__":

@@ -11,6 +11,9 @@ CONFIDENCE_PATTERN = re.compile(r"CONFIDENCE\s*:\s*(HIGH|LOW)", flags=re.IGNOREC
 BOXED_PREFIX = r"\boxed{"
 LITERAL_ANSWERS = {"yes", "no", "true", "false"}
 WRAPPED_LATEX_EXTRACTION_CONFIG = [LatexExtractionConfig(boxed_match_priority=0)]
+REASONING_TOKEN_PATTERN = re.compile(r"(?:\\[A-Za-z]+|[A-Za-z0-9]+)")
+MIN_REASONING_NONSPACE_CHARS = 12
+MIN_REASONING_TOKENS = 3
 
 
 def extract_scored_text(text: str) -> str:
@@ -47,10 +50,22 @@ def has_valid_think_format(
     close_index = completion_text.find("</think>")
     reasoning_text = completion_text[:close_index].strip()
     answer_text = completion_text[close_index + len("</think>") :].strip()
-    if not reasoning_text or not answer_text:
+    if not _has_substantive_reasoning(reasoning_text) or not answer_text:
         return False
 
     return extract_last_boxed_answer(answer_text) != ""
+
+
+def _has_substantive_reasoning(reasoning_text: str) -> bool:
+    compact_reasoning = "".join((reasoning_text or "").split())
+    if len(compact_reasoning) < MIN_REASONING_NONSPACE_CHARS:
+        return False
+
+    tokens = REASONING_TOKEN_PATTERN.findall(reasoning_text)
+    if len(tokens) < MIN_REASONING_TOKENS:
+        return False
+
+    return any(any(char.isalpha() for char in token) for token in tokens)
 
 
 def extract_last_boxed_answer(text: str) -> str:

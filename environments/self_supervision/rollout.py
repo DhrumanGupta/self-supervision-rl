@@ -37,7 +37,10 @@ def _trim_completion_ids(
 ) -> list[int]:
     trimmed_ids = []
     for token_id in token_ids:
-        if token_id == eos_token_id or token_id == pad_token_id:
+        if token_id == eos_token_id:
+            trimmed_ids.append(token_id)
+            break
+        if token_id == pad_token_id:
             break
         trimmed_ids.append(token_id)
     return trimmed_ids

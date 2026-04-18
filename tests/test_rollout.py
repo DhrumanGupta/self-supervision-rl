@@ -36,7 +36,7 @@ class ExtractCompletionIdsTests(unittest.TestCase):
             pad_token_id=0,
         )
 
-        self.assertEqual(completion_ids, [[101, 102], [201]])
+        self.assertEqual(completion_ids, [[101, 102, 99], [201, 99]])
 
     def test_trims_completion_ids_at_pad_when_no_eos_is_present(self) -> None:
         input_ids = torch.tensor([[11, 12], [21, 22]])

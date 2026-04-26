@@ -18,6 +18,8 @@ LATEX_TEXT_WRAPPER_PATTERN = re.compile(
     r"^\\(?:text|mathrm)\s*\{\s*(.*?)\s*\}$",
     flags=re.IGNORECASE,
 )
+DISPLAY_MATH_OPEN = r"\["
+DISPLAY_MATH_CLOSE = r"\]"
 
 
 def extract_scored_text(text: str) -> str:
@@ -29,6 +31,36 @@ def extract_scored_text(text: str) -> str:
     if closing_index >= 0:
         return text[closing_index + len("</think>") :].strip()
     return ""
+
+
+def _extract_strict_final_boxed_answer(text: str) -> str:
+    text = (text or "").strip()
+    if not text.startswith(DISPLAY_MATH_OPEN) or not text.endswith(DISPLAY_MATH_CLOSE):
+        return ""
+
+    inner = text[len(DISPLAY_MATH_OPEN) : -len(DISPLAY_MATH_CLOSE)].strip()
+    if not inner.startswith(BOXED_PREFIX):
+        return ""
+
+    content_start = len(BOXED_PREFIX)
+    depth = 1
+    index = content_start
+    while index < len(inner) and depth > 0:
+        char = inner[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+
+    if depth != 0:
+        return ""
+
+    trailing_text = inner[index:].strip()
+    if trailing_text:
+        return ""
+
+    return inner[content_start : index - 1].strip()
 
 
 def has_valid_think_format(
@@ -57,7 +89,7 @@ def has_valid_think_format(
     if not _has_substantive_reasoning(reasoning_text) or not answer_text:
         return False
 
-    return extract_last_boxed_answer(answer_text) != ""
+    return _extract_strict_final_boxed_answer(answer_text) != ""
 
 
 def _has_substantive_reasoning(reasoning_text: str) -> bool:
@@ -106,7 +138,7 @@ def extract_final_answer(text: str) -> str:
     if not text:
         return ""
 
-    return extract_last_boxed_answer(text)
+    return _extract_strict_final_boxed_answer(text)
 
 
 def is_literal_answer(text: str) -> bool:

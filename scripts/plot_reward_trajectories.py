@@ -16,7 +16,6 @@ REWARD_METRICS = [
     "rewards/reward_wrapper/mean",
     "rewards/reward_wrapper/std",
     "frac_reward_zero_std",
-    "self_reward/total",
     "self_reward/exact_match",
     "self_reward/formatting",
     "self_reward/verifier",
@@ -28,7 +27,6 @@ METRIC_LABELS = {
     "rewards/reward_wrapper/mean": "Wrapper Reward Mean",
     "rewards/reward_wrapper/std": "Wrapper Reward Std",
     "frac_reward_zero_std": "Frac Reward Zero Std",
-    "self_reward/total": "Self Reward Total",
     "self_reward/exact_match": "Self Reward Exact Match",
     "self_reward/formatting": "Self Reward Formatting",
     "self_reward/verifier": "Self Reward Verifier",
@@ -154,7 +152,6 @@ def plot_train_eval_overlay(
     overlay_metrics = [
         ("reward", "eval_reward"),
         ("reward_std", "eval_reward_std"),
-        ("self_reward/total", "eval_self_reward/total"),
         ("self_reward/exact_match", "eval_self_reward/exact_match"),
         ("self_reward/formatting", "eval_self_reward/formatting"),
     ]

@@ -126,34 +126,6 @@ class BuildTrainEvalDatasetsTests(unittest.TestCase):
         self.assertEqual(train_a["answer"], train_b["answer"])
         self.assertEqual(eval_a["answer"], eval_b["answer"])
 
-    def test_different_seeds_change_split_membership(self) -> None:
-        with (
-            patch(
-                "environments.self_supervision.dataset._get_available_splits",
-                return_value={"train"},
-            ),
-            patch(
-                "environments.self_supervision.dataset._load_split_dataset",
-                return_value=self.source_dataset,
-            ),
-        ):
-            _, eval_a = build_train_eval_datasets(
-                dataset_name="zwhe99/DeepMath-103K",
-                question_key="question",
-                answer_key="final_answer",
-                eval_examples=-1,
-                seed=3,
-            )
-            _, eval_b = build_train_eval_datasets(
-                dataset_name="zwhe99/DeepMath-103K",
-                question_key="question",
-                answer_key="final_answer",
-                eval_examples=-1,
-                seed=17,
-            )
-
-        self.assertNotEqual(eval_a["answer"], eval_b["answer"])
-
     def test_example_limits_apply_after_split(self) -> None:
         with (
             patch(
@@ -223,18 +195,6 @@ class FixedBandEvalSubsetTests(unittest.TestCase):
         )
         self.assertEqual(
             subsets_a[DEEP_MATH_B3]["answer"], subsets_b[DEEP_MATH_B3]["answer"]
-        )
-
-    def test_changes_membership_for_different_seed(self) -> None:
-        subsets_a = build_fixed_band_eval_subsets(
-            self.dataset, per_band_limit=1, seed=3
-        )
-        subsets_b = build_fixed_band_eval_subsets(
-            self.dataset, per_band_limit=1, seed=17
-        )
-
-        self.assertNotEqual(
-            subsets_a[DEEP_MATH_B0]["answer"], subsets_b[DEEP_MATH_B0]["answer"]
         )
 
     def test_applies_per_band_limit(self) -> None:

@@ -9,8 +9,42 @@ from trl import GRPOTrainer
 from trl.trainer import grpo_trainer as trl_grpo_trainer
 
 
+FILTERED_METRIC_KEYS = {
+    "sampling/sampling_logp_difference/mean",
+    "sampling/sampling_logp_difference/max",
+    "sampling/importance_sampling_ratio/mean",
+    "sampling/importance_sampling_ratio/max",
+    "sampling/importance_sampling_ratio/min",
+    "rewards/self_reward_function/mean",
+    "rewards/self_reward_function/std",
+}
+
+
 class SelfSupervisionGRPOTrainer(GRPOTrainer):
     completion_logging_steps = 1
+
+    def compute_loss(
+        self,
+        model,
+        inputs,
+        return_outputs: bool = False,
+        num_items_in_batch=None,
+    ):
+        if return_outputs:
+            raise ValueError("The GRPOTrainer does not support returning outputs")
+
+        use_liger_now = self.use_liger_kernel and self.model.training
+        if use_liger_now:
+            unwrapped_model = self.accelerator.unwrap_model(model)
+            return self._forward_redirection(
+                model,
+                unwrapped_model,
+                self.compute_liger_loss,
+                unwrapped_model,
+                inputs,
+            )
+
+        return self._compute_loss(model, inputs)
 
     def _generate_and_score_completions(self, inputs):
         output = super()._generate_and_score_completions(inputs)
@@ -48,6 +82,8 @@ class SelfSupervisionGRPOTrainer(GRPOTrainer):
         mode = "train" if self.model.training else "eval"
         metrics = {}
         for key, val in self._metrics[mode].items():
+            if key in FILTERED_METRIC_KEYS:
+                continue
             valid = [value for value in val if not math.isnan(value)]
             metrics[key] = sum(valid) / len(valid) if valid else None
 
@@ -78,7 +114,6 @@ class SelfSupervisionGRPOTrainer(GRPOTrainer):
 
             table = {
                 "mode": [mode] * len(self._logs["prompt"]),
-                "step": [self.state.global_step] * len(self._logs["prompt"]),
                 "prompt": self._logs["prompt"],
                 "completion": self._logs["completion"],
                 **self._logs["rewards"],

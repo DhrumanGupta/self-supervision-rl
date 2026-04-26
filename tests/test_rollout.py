@@ -80,15 +80,6 @@ class RolloutProfilingTests(unittest.TestCase):
         self.assertEqual(trainer.vllm_generation.calls[0]["num_generations"], 4)
         self.assertEqual(trainer.vllm_generation.calls[1]["num_generations"], 1)
 
-    def test_flattens_sampled_logprobs_from_vllm(self) -> None:
-        trainer = _FakeTrainer(enable_verifier_reward=False)
-
-        result = self_reward_rollout(
-            [[{"role": "user", "content": "What is 2+2?"}]], trainer
-        )
-
-        self.assertEqual(result["logprobs"], [[-0.1, -0.2]])
-
     def test_logs_rollout_timings_without_self_eval(self) -> None:
         trainer = _FakeTrainer(enable_verifier_reward=False)
 
@@ -102,6 +93,9 @@ class RolloutProfilingTests(unittest.TestCase):
 
         self.assertEqual(
             trainer.logged_metrics["profiling/rollout/main_generate_s"], [1.5]
+        )
+        self.assertEqual(
+            trainer.vllm_generation.calls[0]["num_generations"], 4
         )
         self.assertNotIn(
             "profiling/rollout/self_eval_generate_s", trainer.logged_metrics

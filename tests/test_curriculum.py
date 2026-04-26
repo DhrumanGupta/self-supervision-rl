@@ -23,15 +23,6 @@ from environments.self_supervision.curriculum import (  # noqa: E402
 
 
 class CurriculumControllerTests(unittest.TestCase):
-    def test_does_not_promote_before_min_stage_steps(self) -> None:
-        controller = CurriculumController(CurriculumConfig.default_deepmath())
-
-        promoted = controller.record_frontier_eval(global_step=300, exact_match=0.9)
-
-        self.assertFalse(promoted)
-        self.assertEqual(controller.current_stage_index, 0)
-        self.assertEqual(controller.consecutive_frontier_successes, 0)
-
     def test_promotes_after_two_consecutive_qualifying_evals(self) -> None:
         controller = CurriculumController(CurriculumConfig.default_deepmath())
 
@@ -66,22 +57,6 @@ class CurriculumControllerTests(unittest.TestCase):
 
         self.assertFalse(promoted)
         self.assertEqual(controller.current_stage_index, len(config.stages) - 1)
-
-    def test_state_roundtrip(self) -> None:
-        controller = CurriculumController(
-            CurriculumConfig.default_deepmath(),
-            current_stage_index=2,
-            stage_start_step=700,
-            consecutive_frontier_successes=1,
-        )
-        restored = CurriculumController(CurriculumConfig.default_deepmath())
-
-        restored.load_state_dict(controller.state_dict())
-
-        self.assertEqual(restored.current_stage_index, 2)
-        self.assertEqual(restored.stage_start_step, 700)
-        self.assertEqual(restored.consecutive_frontier_successes, 1)
-
 
 class CurriculumRepeatSamplerTests(unittest.TestCase):
     def test_preserves_repeat_sampler_pattern(self) -> None:

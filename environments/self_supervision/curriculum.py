@@ -15,7 +15,6 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 from environments.self_supervision.dataset import DEEP_MATH_BAND_ORDER
 from environments.self_supervision.trainer import SelfSupervisionGRPOTrainer
 
-
 logger = logging.getLogger(__name__)
 
 CURRICULUM_STATE_NAME = "curriculum_state.json"
@@ -46,21 +45,21 @@ class CurriculumConfig:
                     name="stage_0",
                     sampling_weights={"B0": 1.0},
                     frontier_band="B0",
-                    min_stage_steps=400,
+                    min_stage_steps=200,
                     promotion_threshold=0.25,
                 ),
                 CurriculumStageConfig(
                     name="stage_1",
                     sampling_weights={"B1": 0.70, "B0": 0.30},
                     frontier_band="B1",
-                    min_stage_steps=600,
+                    min_stage_steps=200,
                     promotion_threshold=0.18,
                 ),
                 CurriculumStageConfig(
                     name="stage_2",
                     sampling_weights={"B2": 0.55, "B1": 0.30, "B0": 0.15},
                     frontier_band="B2",
-                    min_stage_steps=800,
+                    min_stage_steps=200,
                     promotion_threshold=0.12,
                 ),
                 CurriculumStageConfig(

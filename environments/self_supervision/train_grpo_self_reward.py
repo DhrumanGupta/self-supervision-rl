@@ -107,6 +107,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=50)
+    parser.add_argument("--loss_type", type=str, default="dapo")
     parser.add_argument(
         "--disable_curriculum",
         action="store_true",
@@ -297,6 +298,7 @@ def main() -> None:
         per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         max_completion_length=MAX_COMPLETION_LENGTH,
+        loss_type=args.loss_type,
         temperature=args.temperature,
         top_p=args.top_p,
         top_k=args.top_k,

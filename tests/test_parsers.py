@@ -50,10 +50,22 @@ some context before \boxed{\frac{h^2}{m}} and after
 class ExtractFinalAnswerTests(unittest.TestCase):
     def test_extracts_boxed_answer_after_think_block(self) -> None:
         completion = r"<think>work here</think> Yes. So final answer. \[ \boxed{\frac{h^2}{m}} \]"
+        self.assertEqual(extract_final_answer(completion), "")
+
+    def test_extracts_boxed_answer_when_post_think_text_is_exact_boxed_display(self) -> None:
+        completion = r"<think>work here</think> \[ \boxed{\frac{h^2}{m}} \]"
         self.assertEqual(extract_final_answer(completion), r"\frac{h^2}{m}")
 
     def test_returns_empty_string_when_no_boxed_answer_exists(self) -> None:
         completion = r"<think>work here</think> Final answer: \frac{h^2}{m}"
+        self.assertEqual(extract_final_answer(completion), "")
+
+    def test_returns_empty_string_when_trailing_tag_follows_boxed_answer(self) -> None:
+        completion = r"<think>work here</think> \[ \boxed{1} \]</tool_response>"
+        self.assertEqual(extract_final_answer(completion), "")
+
+    def test_returns_empty_string_when_extra_text_follows_boxed_answer(self) -> None:
+        completion = r"<think>work here</think> \[ \boxed{1} \] extra"
         self.assertEqual(extract_final_answer(completion), "")
 
 
@@ -95,6 +107,30 @@ class ThinkFormatTests(unittest.TestCase):
             has_valid_think_format(
                 "question <think>",
                 r"compute</think> \[ \boxed{1} \]",
+            )
+        )
+
+    def test_rejects_trailing_tag_after_boxed_answer(self) -> None:
+        self.assertFalse(
+            has_valid_think_format(
+                "question <think>",
+                r"We reason carefully here</think> \[ \boxed{1} \]</tool_response>",
+            )
+        )
+
+    def test_rejects_extra_text_after_boxed_answer(self) -> None:
+        self.assertFalse(
+            has_valid_think_format(
+                "question <think>",
+                r"We reason carefully here</think> \[ \boxed{1} \] trailing",
+            )
+        )
+
+    def test_rejects_answer_text_before_boxed_display(self) -> None:
+        self.assertFalse(
+            has_valid_think_format(
+                "question <think>",
+                r"We reason carefully here</think> Final answer: \[ \boxed{1} \]",
             )
         )
 

@@ -11,7 +11,7 @@ fi
 
 export WANDB_PROJECT=self-supervision-rl
 export WANDB_ENTITY=berlm-ashoka-university
-export WANDB_NAME=4k-context-qwen35-9b-base-deepmath-vllm
+export WANDB_NAME=qwen35-9b-base-deepmath-vllm-dapo-no-length-penalty
 
 export MODEL_NAME="Qwen/Qwen3.5-9B-Base"
 
@@ -100,9 +100,10 @@ accelerate launch --num_processes "$NUM_PROCESSES" --num_machines 1 --mixed_prec
   --eval_examples -1 \
   --temperature 0.6 \
   --top_p 0.95 \
+  --loss_type dapo \
   --learning_rate 5e-6 \
   --exact_match_weight 1.0 \
-  --length_penalty_weight 1e-5 \
+  --length_penalty_weight 0 \
   --save_steps 50 \
   --curriculum_eval_examples_per_band 64 \
   "${RESUME_ARGS[@]}"

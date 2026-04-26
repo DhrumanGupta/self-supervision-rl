@@ -49,6 +49,23 @@ def _compute_exact_match_scores(
     return exact_match_scores, exact_match_skipped
 
 
+def _signed_exact_match_reward(exact_match_score: float) -> float:
+    return 1.0 if exact_match_score == 1.0 else -1.0
+
+
+def _extract_difficulties(batch_size: int, info_values) -> list[float]:
+    if info_values is None:
+        return [-1.0] * batch_size
+
+    difficulties = []
+    for info in info_values:
+        if isinstance(info, dict) and info.get("difficulty") is not None:
+            difficulties.append(float(info["difficulty"]))
+        else:
+            difficulties.append(-1.0)
+    return difficulties
+
+
 def self_reward_function(
     prompts,
     completions,
@@ -97,12 +114,18 @@ def self_reward_function(
     if completion_ids is None:
         completion_ids = [None] * len(first_completion_text)
 
+    difficulties = _extract_difficulties(
+        len(first_completion_text),
+        kwargs.get("info"),
+    )
+
     _validate_batch_lengths(
         rendered_prompt_text=rendered_prompt_text,
         first_completion_text=first_completion_text,
         self_eval_text=self_eval_text,
         answer=answer,
         completion_ids=completion_ids,
+        difficulty=difficulties,
     )
 
     gold_answers = [str(item).strip() for item in answer]
@@ -136,6 +159,7 @@ def self_reward_function(
             1.0 if has_valid_think_format(prompt_text, completion_text or "") else 0.0
         )
         exact_match_value = float(exact_match_score)
+        signed_exact_match_reward = _signed_exact_match_reward(exact_match_value)
         accuracy_skipped = bool(exact_match_skipped_flag)
         said_correct = 0.0
         confidence = 0.0
@@ -163,11 +187,9 @@ def self_reward_function(
         completion_length = (
             len(token_ids) if token_ids is not None else len(completion_text or "")
         )
-        gated_exact_match_reward = (
-            formatting_score * weights.exact_match * exact_match_value
-        )
+        exact_match_reward = weights.exact_match * signed_exact_match_reward
         gated_verifier_reward = formatting_score * weights.verifier * verifier_score
-        base_reward = gated_exact_match_reward + gated_verifier_reward
+        base_reward = exact_match_reward + gated_verifier_reward
         length_penalty = weights.length_penalty * completion_length
         total = base_reward - length_penalty
         rewards.append(float(total))
@@ -180,8 +202,8 @@ def self_reward_function(
         completion_lengths.append(completion_length)
 
     if log_extra:
+        log_extra("difficulty", difficulties)
         log_extra("gold_answer", [str(item) for item in answer])
-        log_extra("first_completion_text", list(first_completion_text))
         log_extra("self_eval_text", list(self_eval_text))
         log_extra("predicted_answer", predicted_answers)
         log_extra("completion_length", completion_lengths)
@@ -206,6 +228,5 @@ def self_reward_function(
             "self_reward/formatting", sum(formatting_scores) / len(formatting_scores)
         )
         log_metric("self_reward/verifier", sum(verifier_scores) / len(verifier_scores))
-        log_metric("self_reward/total", sum(rewards) / len(rewards))
 
     return rewards
